@@ -32,8 +32,25 @@
         display: block;
         margin-top: 8px;
       }
-      #file {
+      .slider-container {
         margin: 20px 0;
+        text-align: center;
+      }
+      .image-slider {
+        width: 80%;
+        max-width: 400px;
+        margin: 10px 0;
+      }
+      .image-info {
+        margin-top: 10px;
+        font-size: 14px;
+        color: #666;
+      }
+      .inference-time {
+        margin-top: 5px;
+        font-size: 12px;
+        color: #888;
+        font-weight: bold;
       }
     </style>
   </head>
@@ -41,8 +58,17 @@
     <div class="container">
       <h1>SED Estimation from Surface Pressure</h1>
 
-      <!-- Image Upload -->
-      <input id="file" type="file" accept="image/*" />
+      <!-- Image Selection Slider -->
+      <div class="slider-container">
+        <label for="imageSlider">Select Input Image:</label>
+        <input id="imageSlider" type="range" class="image-slider" min="0" max="19" value="0" step="1" />
+        <div class="image-info">
+          <span id="imageInfo">Image 1 / 20: file01_00050.png</span>
+        </div>
+        <div class="inference-time">
+          <span id="inferenceTime">Inference time: -</span>
+        </div>
+      </div>
 
       <!-- Canvas Container for Side-by-Side Display -->
       <div class="canvas-container">
@@ -51,7 +77,11 @@
           <canvas id="inputCanvas" width="224" height="224"></canvas>
         </div>
         <div class="canvas-section">
-          <p>Output (SED)</p>
+          <p>Target (SED, ground truth)</p>
+          <canvas id="targetCanvas" width="224" height="224"></canvas>
+        </div>
+        <div class="canvas-section">
+          <p>Output (SED, estimated)</p>
           <canvas id="outputCanvas" width="224" height="224"></canvas>
         </div>
       </div>

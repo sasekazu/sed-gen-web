@@ -9,20 +9,36 @@ ort.env.logLevel = 'verbose';
 /* 定数 */
 const MODEL_URL = './unet.onnx';
 const SIZE      = 224;
-const PRESSURE_MASK_URL = './resources/mask-pressure.png';
-const SED_MASK_URL = './resources/mask-sed.png';
-const DEFAULT_IMAGE_URL = './resources/input-sample.png';
+const PRESSURE_MASK_URL = './resources/mask/mask-pressure.png';
+const SED_MASK_URL = './resources/mask/mask-sed.png';
+const DEFAULT_IMAGE_URL = './resources/input/file01_00050.png';
+
+/* 画像リストの定義 */
+const INPUT_IMAGES = [
+  'file01_00050.png', 'file01_00148.png', 'file01_00232.png', 'file01_00337.png', 'file01_00421.png',
+  'file01_00526.png', 'file01_00617.png', 'file01_00715.png', 'file01_00918.png', 'file01_00988.png',
+  'file02_00134.png', 'file02_00239.png', 'file02_00344.png', 'file02_00428.png', 'file02_00526.png',
+  'file02_00617.png', 'file02_00715.png', 'file02_00813.png', 'file02_00904.png', 'file02_00988.png'
+];
 
 /* DOM 取得 */
-const fileInput    = document.getElementById('file');
+const imageSlider = document.getElementById('imageSlider');
+const imageInfo = document.getElementById('imageInfo');
+const inferenceTime = document.getElementById('inferenceTime');
 const inputCanvas  = document.getElementById('inputCanvas');
+const targetCanvas = document.getElementById('targetCanvas');
 const outputCanvas = document.getElementById('outputCanvas');
 const inCtx  = inputCanvas.getContext('2d');
+const targetCtx = targetCanvas.getContext('2d');
 const outCtx = outputCanvas.getContext('2d');
 
 /* マスク画像の読み込み（事前に読み込んでおく） */
 let pressureMask = null;
 let sedMask = null;
+
+/* プリロードされた画像の格納 */
+let preloadedImages = [];
+let preloadedTargetImages = [];
 
 const loadMasks = async () => {
   try {
@@ -34,6 +50,54 @@ const loadMasks = async () => {
     console.log('All masks loaded successfully');
   } catch (error) {
     console.error('Failed to load masks:', error);
+    throw error;
+  }
+};
+
+/* 全ての入力画像をプリロード */
+const preloadInputImages = async () => {
+  try {
+    console.log('Preloading input images...');
+    preloadedImages = await Promise.all(
+      INPUT_IMAGES.map(async (filename, index) => {
+        try {
+          const url = `./resources/input/${filename}`;
+          const img = await urlToImage(url);
+          console.log(`Loaded input image ${index + 1}/${INPUT_IMAGES.length}: ${filename}`);
+          return img;
+        } catch (error) {
+          console.warn(`Failed to load input image: ${filename}`, error);
+          return null;
+        }
+      })
+    );
+    console.log('All input images preloaded successfully');
+  } catch (error) {
+    console.error('Failed to preload input images:', error);
+    throw error;
+  }
+};
+
+/* 全てのターゲット画像をプリロード */
+const preloadTargetImages = async () => {
+  try {
+    console.log('Preloading target images...');
+    preloadedTargetImages = await Promise.all(
+      INPUT_IMAGES.map(async (filename, index) => {
+        try {
+          const url = `./resources/target/${filename}`;
+          const img = await urlToImage(url);
+          console.log(`Loaded target image ${index + 1}/${INPUT_IMAGES.length}: ${filename}`);
+          return img;
+        } catch (error) {
+          console.warn(`Failed to load target image: ${filename}`, error);
+          return null;
+        }
+      })
+    );
+    console.log('All target images preloaded successfully');
+  } catch (error) {
+    console.error('Failed to preload target images:', error);
     throw error;
   }
 };
@@ -94,21 +158,34 @@ const sessionPromise = ort.InferenceSession.create(MODEL_URL, {
   throw error;
 });
 
-/* 画像アップロード */
-fileInput.addEventListener('change', async ({ target }) => {
+/* スライダーで画像選択 */
+imageSlider.addEventListener('input', async (event) => {
   try {
-    const file = target.files?.[0];
-    if (!file) return;
-
-    const img = await fileToImage(file);
-    await processImage(img);
+    const index = parseInt(event.target.value);
+    const img = preloadedImages[index];
+    const targetImg = preloadedTargetImages[index];
+    
+    if (img) {
+      // 画像情報を更新
+      updateImageInfo(index);
+      // 画像を処理
+      await processImage(img, targetImg);
+    } else {
+      console.warn(`Image at index ${index} is not available`);
+    }
   } catch (error) {
-    console.error('Error during file processing:', error);
+    console.error('Error during image selection:', error);
   }
 });
 
+/* 画像情報の更新 */
+function updateImageInfo(index) {
+  const filename = INPUT_IMAGES[index];
+  imageInfo.textContent = `Image ${index + 1} / ${INPUT_IMAGES.length}: ${filename}`;
+}
+
 /* 画像処理の共通ロジック */
-async function processImage(img) {
+async function processImage(img, targetImg = null) {
   try {
     // マスクが読み込まれていない場合は読み込む
     if (!pressureMask || !sedMask) {
@@ -124,6 +201,33 @@ async function processImage(img) {
     inCtx.clearRect(0, 0, SIZE, SIZE);
     inCtx.drawImage(img, 0, 0, SIZE, SIZE);
 
+    /* ターゲット画像の表示 */
+    if (targetImg) {
+      targetCtx.clearRect(0, 0, SIZE, SIZE);
+      targetCtx.drawImage(targetImg, 0, 0, SIZE, SIZE);
+      
+      /* ターゲット画像をturboカラーマップで変換してからマスクを適用 */
+      const targetImageData = targetCtx.getImageData(0, 0, SIZE, SIZE);
+      const targetTurboImageData = new ImageData(SIZE, SIZE);
+      
+      for (let i = 0; i < SIZE * SIZE; i++) {
+        const p = i * 4;
+        // RGBA → BT.601 グレースケール → 0-1正規化
+        const grayValue = (0.299 * targetImageData.data[p] + 0.587 * targetImageData.data[p + 1] + 0.114 * targetImageData.data[p + 2]) / 255.0;
+        const [r, g, b] = grayToTurbo(grayValue);
+        targetTurboImageData.data[p]     = r;   // R
+        targetTurboImageData.data[p + 1] = g;   // G
+        targetTurboImageData.data[p + 2] = b;   // B
+        targetTurboImageData.data[p + 3] = 255; // A (完全不透明)
+      }
+      
+      const maskedTargetImageData = applyMask(targetTurboImageData, sedMask);
+      targetCtx.putImageData(maskedTargetImageData, 0, 0);
+    } else {
+      // ターゲット画像がない場合はキャンバスをクリア
+      targetCtx.clearRect(0, 0, SIZE, SIZE);
+    }
+
     /* 推論用：マスクをかける前の元画像データを取得 */
     const originalImageData = inCtx.getImageData(0, 0, SIZE, SIZE);
 
@@ -136,8 +240,17 @@ async function processImage(img) {
     }
     const input = new ort.Tensor('float32', gray, [1, 1, SIZE, SIZE]);
 
-    /* 推論 */
+    /* 推論（時間計測あり） */
+    console.log('Starting inference...');
+    const startTime = performance.now();
     const { output } = await session.run({ input });
+    const endTime = performance.now();
+    const inferenceTimeMs = endTime - startTime;
+    
+    console.log(`Inference completed in ${inferenceTimeMs.toFixed(2)} ms`);
+    
+    /* 推論時間を表示に更新 */
+    inferenceTime.textContent = `Inference time: ${inferenceTimeMs.toFixed(2)} ms`;
 
     /* 表示用：入力画像をturboカラーマップで変換してからマスクを適用 */
     const inputTurboImageData = new ImageData(SIZE, SIZE);
@@ -173,18 +286,20 @@ async function processImage(img) {
   }
 }
 
-/* デフォルト画像を読み込んで処理 */
+/* デフォルト画像（最初の画像）を処理 */
 async function loadDefaultImage() {
   try {
-    console.log('Loading default image from:', DEFAULT_IMAGE_URL);
-    const img = await urlToImage(DEFAULT_IMAGE_URL);
-    console.log('Default image loaded successfully, processing...');
-    await processImage(img);
-    console.log('Default image processed successfully');
+    if (preloadedImages.length > 0 && preloadedImages[0]) {
+      console.log('Processing default image (first preloaded image)...');
+      updateImageInfo(0);
+      const targetImg = preloadedTargetImages.length > 0 ? preloadedTargetImages[0] : null;
+      await processImage(preloadedImages[0], targetImg);
+      console.log('Default image processed successfully');
+    } else {
+      console.warn('No preloaded images available');
+    }
   } catch (error) {
-    console.warn('Default image not found or failed to load:', DEFAULT_IMAGE_URL);
-    console.warn('Error details:', error.message);
-    console.log('You can upload an image manually using the file input.');
+    console.error('Error processing default image:', error);
   }
 }
 
@@ -194,17 +309,6 @@ function urlToImage(url) {
     const img = new Image();
     img.onload = () => resolve(img);
     img.onerror = reject;
-    img.src = url;
-  });
-}
-
-/* File → Image 変換 */
-function fileToImage(file) {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload  = () => { URL.revokeObjectURL(url); resolve(img); };
-    img.onerror = (e) => { URL.revokeObjectURL(url); reject(e); };
     img.src = url;
   });
 }
@@ -292,13 +396,13 @@ function grayToTurbo(grayValue) {
   ];
 }
 
-/* ページ読み込み時にマスク画像をプリロードし、デフォルト画像を処理 */
-loadMasks()
+/* ページ読み込み時にマスク画像と入力画像をプリロードし、デフォルト画像を処理 */
+Promise.all([loadMasks(), preloadInputImages(), preloadTargetImages()])
   .then(() => {
-    console.log('Masks loaded, now loading default image...');
+    console.log('All resources loaded, now processing default image...');
     return loadDefaultImage();
   })
   .catch(error => {
     console.error('Failed to initialize application:', error);
-    console.log('You can still upload images manually using the file input.');
+    console.log('Some features may not work properly.');
   });
