@@ -37,6 +37,7 @@ const sliderMode = document.getElementById('sliderMode');
 const interactiveMode = document.getElementById('interactiveMode');
 const sliderContainer = document.getElementById('sliderContainer');
 const interactiveContainer = document.getElementById('interactiveContainer');
+const clearButtonContainer = document.getElementById('clearButtonContainer');
 const targetSection = document.getElementById('targetSection');
 const clearButton = document.getElementById('clearButton');
 
@@ -427,6 +428,7 @@ function switchMode(mode) {
   if (mode === 'slider') {
     sliderContainer.style.display = 'block';
     interactiveContainer.style.display = 'none';
+    clearButtonContainer.style.display = 'none';
     targetSection.style.display = 'block';
     
     // スライダーモード用のイベントリスナーを有効化
@@ -450,6 +452,7 @@ function switchMode(mode) {
   } else if (mode === 'interactive') {
     sliderContainer.style.display = 'none';
     interactiveContainer.style.display = 'block';
+    clearButtonContainer.style.display = 'block';
     targetSection.style.display = 'none';
     
     // スライダーモード用のイベントリスナーを無効化

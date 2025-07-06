@@ -125,19 +125,9 @@
         </label>
       </div>
 
-      <!-- Image Selection Slider (Slider Mode) -->
-      <div class="slider-container" id="sliderContainer">
-        <label for="imageSlider">Select Input Image:</label>
-        <input id="imageSlider" type="range" class="image-slider" min="0" max="19" value="0" step="1" />
-        <div class="image-info">
-          <span id="imageInfo">Image 1 / 20: file01_00050.png</span>
-        </div>
-      </div>
-
       <!-- Interactive Mode Instructions -->
       <div class="interactive-container" id="interactiveContainer" style="display: none;">
         <p>Move your mouse over the input canvas or touch/tap on mobile devices to add Gaussian distributions and see real-time inference results.</p>
-        <button id="clearButton">Clear Input</button>
       </div>
 
       <!-- Inference Time Display -->
@@ -159,6 +149,20 @@
           <p>Output (SED, estimated)</p>
           <canvas id="outputCanvas" width="224" height="224"></canvas>
         </div>
+      </div>
+
+      <!-- Image Selection Slider (Slider Mode) -->
+      <div class="slider-container" id="sliderContainer">
+        <label for="imageSlider">Select Input Image:</label>
+        <input id="imageSlider" type="range" class="image-slider" min="0" max="19" value="0" step="1" />
+        <div class="image-info">
+          <span id="imageInfo">Image 1 / 20: file01_00050.png</span>
+        </div>
+      </div>
+
+      <!-- Clear Input Button (Interactive Mode) -->
+      <div class="interactive-container" id="clearButtonContainer" style="display: none;">
+        <button id="clearButton">Clear Input</button>
       </div>
 
       <!-- Footer -->
