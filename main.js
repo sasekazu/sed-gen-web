@@ -32,6 +32,21 @@ const inCtx  = inputCanvas.getContext('2d');
 const targetCtx = targetCanvas.getContext('2d');
 const outCtx = outputCanvas.getContext('2d');
 
+/* モード関連のDOM要素 */
+const sliderMode = document.getElementById('sliderMode');
+const interactiveMode = document.getElementById('interactiveMode');
+const sliderContainer = document.getElementById('sliderContainer');
+const interactiveContainer = document.getElementById('interactiveContainer');
+const targetSection = document.getElementById('targetSection');
+const clearButton = document.getElementById('clearButton');
+
+/* グローバル変数 */
+let currentMode = 'slider';
+let interactiveInputData = new Float32Array(SIZE * SIZE); // Interactive mode用の入力データ
+let permanentInputData = new Float32Array(SIZE * SIZE); // マウスボタンが押されている間の永続的な入力データ
+let isProcessing = false; // 推論中フラグ
+let isMouseDown = false; // マウスボタンが押されているかどうか
+
 /* マスク画像の読み込み（事前に読み込んでおく） */
 let pressureMask = null;
 let sedMask = null;
@@ -158,8 +173,8 @@ const sessionPromise = ort.InferenceSession.create(MODEL_URL, {
   throw error;
 });
 
-/* スライダーで画像選択 */
-imageSlider.addEventListener('input', async (event) => {
+/* スライダーで画像選択の処理を関数として分離 */
+async function onSliderChange(event) {
   try {
     const index = parseInt(event.target.value);
     const img = preloadedImages[index];
@@ -176,7 +191,10 @@ imageSlider.addEventListener('input', async (event) => {
   } catch (error) {
     console.error('Error during image selection:', error);
   }
-});
+}
+
+/* スライダーで画像選択（初期設定では有効） */
+imageSlider.addEventListener('input', onSliderChange);
 
 /* 画像情報の更新 */
 function updateImageInfo(index) {
@@ -186,7 +204,11 @@ function updateImageInfo(index) {
 
 /* 画像処理の共通ロジック */
 async function processImage(img, targetImg = null) {
+  if (isProcessing) return; // 推論中は処理しない
+  
   try {
+    isProcessing = true;
+    
     // マスクが読み込まれていない場合は読み込む
     if (!pressureMask || !sedMask) {
       console.log('Loading masks...');
@@ -283,6 +305,8 @@ async function processImage(img, targetImg = null) {
     outCtx.putImageData(maskedOutputImageData, 0, 0);
   } catch (error) {
     console.error('Error during inference:', error);
+  } finally {
+    isProcessing = false;
   }
 }
 
@@ -396,11 +420,305 @@ function grayToTurbo(grayValue) {
   ];
 }
 
+/* モード切替の処理 */
+function switchMode(mode) {
+  currentMode = mode;
+  
+  if (mode === 'slider') {
+    sliderContainer.style.display = 'block';
+    interactiveContainer.style.display = 'none';
+    targetSection.style.display = 'block';
+    
+    // スライダーモード用のイベントリスナーを有効化
+    imageSlider.addEventListener('input', onSliderChange);
+    
+    // インタラクティブモード用のイベントリスナーを無効化
+    inputCanvas.removeEventListener('mousemove', onMouseMove);
+    inputCanvas.removeEventListener('mousedown', onMouseDown);
+    inputCanvas.removeEventListener('mouseup', onMouseUp);
+    inputCanvas.removeEventListener('click', onMouseClick);
+    inputCanvas.style.cursor = 'default';
+    
+    // キャンバスをクリアしてスライダーモードの現在の画像を再描画
+    inCtx.clearRect(0, 0, SIZE, SIZE);
+    outCtx.clearRect(0, 0, SIZE, SIZE);
+    targetCtx.clearRect(0, 0, SIZE, SIZE);
+  } else if (mode === 'interactive') {
+    sliderContainer.style.display = 'none';
+    interactiveContainer.style.display = 'block';
+    targetSection.style.display = 'none';
+    
+    // スライダーモード用のイベントリスナーを無効化
+    imageSlider.removeEventListener('input', onSliderChange);
+    
+    // インタラクティブモード用のイベントリスナーを有効化
+    inputCanvas.addEventListener('mousemove', onMouseMove);
+    inputCanvas.addEventListener('mousedown', onMouseDown);
+    inputCanvas.addEventListener('mouseup', onMouseUp);
+    inputCanvas.addEventListener('click', onMouseClick);
+    inputCanvas.style.cursor = 'crosshair';
+    
+    // キャンバスをクリア
+    inCtx.clearRect(0, 0, SIZE, SIZE);
+    outCtx.clearRect(0, 0, SIZE, SIZE);
+    targetCtx.clearRect(0, 0, SIZE, SIZE);
+  }
+}
+
+/* インタラクティブモードの初期化 */
+async function initInteractiveMode() {
+  // 入力データを初期化（全て0）
+  interactiveInputData.fill(0);
+  permanentInputData.fill(0);
+  isMouseDown = false;
+  
+  // キャンバスをクリア
+  inCtx.clearRect(0, 0, SIZE, SIZE);
+  outCtx.clearRect(0, 0, SIZE, SIZE);
+  
+  // マスクが読み込まれていない場合は読み込む
+  if (!pressureMask || !sedMask) {
+    console.log('Loading masks for interactive mode...');
+    await loadMasks();
+  }
+  
+  // 初期状態のキャンバスを更新（空の状態を視覚化）
+  updateInteractiveCanvas();
+  
+  // 初期推論を実行
+  performInteractiveInference();
+}
+
+/* ガウス分布を生成する関数 */
+function generateGaussian(centerX, centerY, amplitude = 0.5, sigma = 8.0, addToPermanent = false) {
+  const tempData = new Float32Array(SIZE * SIZE);
+  
+  for (let y = 0; y < SIZE; y++) {
+    for (let x = 0; x < SIZE; x++) {
+      const dx = x - centerX;
+      const dy = y - centerY;
+      const distance2 = dx * dx + dy * dy;
+      const gaussValue = amplitude * Math.exp(-distance2 / (2 * sigma * sigma));
+      
+      const index = y * SIZE + x;
+      tempData[index] = gaussValue;
+      
+      // マスクされた部分は常にゼロに設定
+      if (pressureMask) {
+        const p = index * 4;
+        const maskValue = pressureMask.data[p];
+        // しきい値128で黒い部分がマスクされる部分（表示されない部分）
+        if (maskValue >= 128) {
+          tempData[index] = 0;
+        }
+      }
+    }
+  }
+  
+  // 永続的なデータに追加するかどうか
+  if (addToPermanent) {
+    for (let i = 0; i < SIZE * SIZE; i++) {
+      permanentInputData[i] = Math.min(1.0, permanentInputData[i] + tempData[i]);
+    }
+  }
+  
+  // 最終的な入力データを作成（永続的なデータ + 一時的なデータ）
+  for (let i = 0; i < SIZE * SIZE; i++) {
+    interactiveInputData[i] = Math.min(1.0, permanentInputData[i] + tempData[i]);
+  }
+}
+
+/* インタラクティブモード用のマウス移動処理 */
+function onMouseMove(event) {
+  if (currentMode !== 'interactive' || isProcessing) return;
+  
+  const rect = inputCanvas.getBoundingClientRect();
+  const x = Math.floor((event.clientX - rect.left) * (SIZE / rect.width));
+  const y = Math.floor((event.clientY - rect.top) * (SIZE / rect.height));
+  
+  if (isMouseDown) {
+    // マウスボタンが押されている場合：永続的なデータに追加（より強い分布）
+    generateGaussian(x, y, 0.3, 8.0, true);
+  } else {
+    // マウスボタンが離されている場合：一時的な表示のみ（より弱い分布）
+    // まず永続的なデータのみで interactiveInputData をリセット
+    for (let i = 0; i < SIZE * SIZE; i++) {
+      interactiveInputData[i] = permanentInputData[i];
+    }
+    // 現在のマウス位置に一時的なガウス分布を追加
+    generateGaussian(x, y, 0.3, 8.0, false);
+  }
+  
+  // キャンバスを更新
+  updateInteractiveCanvas();
+  
+  // 推論を実行
+  performInteractiveInference();
+}
+
+/* インタラクティブモード用のマウスダウン処理 */
+function onMouseDown(event) {
+  if (currentMode !== 'interactive' || isProcessing) return;
+  
+  isMouseDown = true;
+}
+
+/* インタラクティブモード用のマウスアップ処理 */
+function onMouseUp(event) {
+  if (currentMode !== 'interactive') return;
+  
+  isMouseDown = false;
+}
+
+/* インタラクティブモード用のマウスクリック処理 */
+function onMouseClick(event) {
+  if (currentMode !== 'interactive' || isProcessing) return;
+  
+  const rect = inputCanvas.getBoundingClientRect();
+  const x = Math.floor((event.clientX - rect.left) * (SIZE / rect.width));
+  const y = Math.floor((event.clientY - rect.top) * (SIZE / rect.height));
+  
+  // より強いガウス分布を永続的に追加
+  generateGaussian(x, y, 0.3, 8.0, true);
+  
+  // キャンバスを更新
+  updateInteractiveCanvas();
+  
+  // 推論を実行
+  performInteractiveInference();
+}
+
+/* インタラクティブモード用のキャンバス更新 */
+function updateInteractiveCanvas() {
+  // マスクされた部分を確実にゼロに設定
+  if (pressureMask) {
+    for (let i = 0; i < SIZE * SIZE; i++) {
+      const p = i * 4;
+      const maskValue = pressureMask.data[p];
+      // しきい値128で黒い部分がマスクされる部分（表示されない部分）
+      if (maskValue >= 128) {
+        interactiveInputData[i] = 0;
+      }
+    }
+  }
+  
+  // 入力データをturboカラーマップで表示
+  const inputTurboImageData = new ImageData(SIZE, SIZE);
+  for (let i = 0; i < SIZE * SIZE; i++) {
+    const grayValue = interactiveInputData[i]; // 0-1の正規化済みグレースケール値
+    const [r, g, b] = grayToTurbo(grayValue);
+    const p = i * 4;
+    inputTurboImageData.data[p]     = r;   // R
+    inputTurboImageData.data[p + 1] = g;   // G
+    inputTurboImageData.data[p + 2] = b;   // B
+    inputTurboImageData.data[p + 3] = 255; // A (完全不透明)
+  }
+  
+  // マスクを適用
+  const maskedInputImageData = applyMask(inputTurboImageData, pressureMask);
+  inCtx.putImageData(maskedInputImageData, 0, 0);
+}
+
+/* インタラクティブモード用の推論実行 */
+async function performInteractiveInference() {
+  if (isProcessing) return;
+  
+  try {
+    isProcessing = true;
+    
+    // マスクが読み込まれていない場合は読み込む
+    if (!pressureMask || !sedMask) {
+      console.log('Loading masks...');
+      await loadMasks();
+    }
+
+    console.log('Loading ONNX session...');
+    const session = await sessionPromise;
+    
+    // 入力テンソルを作成
+    const input = new ort.Tensor('float32', interactiveInputData, [1, 1, SIZE, SIZE]);
+
+    /* 推論（時間計測あり） */
+    console.log('Starting interactive inference...');
+    const startTime = performance.now();
+    const { output } = await session.run({ input });
+    const endTime = performance.now();
+    const inferenceTimeMs = endTime - startTime;
+    
+    console.log(`Interactive inference completed in ${inferenceTimeMs.toFixed(2)} ms`);
+    
+    /* 推論時間を表示に更新 */
+    inferenceTime.textContent = `Inference time: ${inferenceTimeMs.toFixed(2)} ms`;
+
+    /* モデル出力をturboカラーマップで描画 */
+    const outputImageData = new ImageData(SIZE, SIZE);
+    for (let i = 0; i < SIZE * SIZE; i++) {
+      const grayValue = Math.max(0, Math.min(1, output.data[i])); // 0-1の範囲にクランプ
+      const [r, g, b] = grayToTurbo(grayValue);
+      const p = i * 4;
+      outputImageData.data[p]     = r;   // R
+      outputImageData.data[p + 1] = g;   // G
+      outputImageData.data[p + 2] = b;   // B
+      outputImageData.data[p + 3] = 255; // A (完全不透明)
+    }
+
+    /* 表示用：出力画像にSEDマスクを適用 */
+    const maskedOutputImageData = applyMask(outputImageData, sedMask);
+    outCtx.putImageData(maskedOutputImageData, 0, 0);
+  } catch (error) {
+    console.error('Error during interactive inference:', error);
+  } finally {
+    isProcessing = false;
+  }
+}
+
+/* モード切替のイベントリスナー */
+sliderMode.addEventListener('change', async () => {
+  if (sliderMode.checked) {
+    switchMode('slider');
+    // スライダーモードに切り替えた時は現在選択されている画像を再描画
+    if (!isProcessing && preloadedImages.length > 0) {
+      const currentIndex = parseInt(imageSlider.value);
+      const img = preloadedImages[currentIndex];
+      const targetImg = preloadedTargetImages[currentIndex];
+      if (img) {
+        updateImageInfo(currentIndex);
+        await processImage(img, targetImg);
+      }
+    }
+  }
+});
+
+interactiveMode.addEventListener('change', async () => {
+  if (interactiveMode.checked) {
+    switchMode('interactive');
+    // ユーザーが手動で切り替えた時のみインタラクティブモードを初期化
+    if (!isProcessing) {
+      await initInteractiveMode();
+    }
+  }
+});
+
+/* クリアボタンの処理 */
+clearButton.addEventListener('click', async () => {
+  if (currentMode === 'interactive') {
+    await initInteractiveMode();
+  }
+});
+
 /* ページ読み込み時にマスク画像と入力画像をプリロードし、デフォルト画像を処理 */
 Promise.all([loadMasks(), preloadInputImages(), preloadTargetImages()])
-  .then(() => {
-    console.log('All resources loaded, now processing default image...');
-    return loadDefaultImage();
+  .then(async () => {
+    console.log('All resources loaded, now initializing mode...');
+    
+    // ラジオボタンの状態を確認して適切なモードを設定
+    if (interactiveMode.checked) {
+      switchMode('interactive');
+      await initInteractiveMode();
+    } else {
+      switchMode('slider');
+      await loadDefaultImage();
+    }
   })
   .catch(error => {
     console.error('Failed to initialize application:', error);

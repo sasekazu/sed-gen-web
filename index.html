@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>U-Net Browser Inference</title>
+    <title>SED-GEN</title>
     <style>
       body {
         font-family: sans-serif;
@@ -52,22 +52,73 @@
         color: #888;
         font-weight: bold;
       }
+      .mode-container {
+        margin: 20px 0;
+        text-align: center;
+      }
+      .mode-container h3 {
+        margin-bottom: 10px;
+      }
+      .mode-container label {
+        margin: 0 20px;
+        cursor: pointer;
+      }
+      .interactive-container {
+        margin: 20px 0;
+        text-align: center;
+      }
+      .interactive-container p {
+        color: #666;
+        font-size: 14px;
+        margin-bottom: 10px;
+      }
+      #clearButton {
+        padding: 8px 16px;
+        background-color: #ff4444;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      #clearButton:hover {
+        background-color: #cc3333;
+      }
     </style>
   </head>
   <body>
     <div class="container">
       <h1>SED Estimation from Surface Pressure</h1>
 
-      <!-- Image Selection Slider -->
-      <div class="slider-container">
+      <!-- Mode Selection -->
+      <div class="mode-container">
+        <label>
+          <input type="radio" name="mode" value="slider" id="sliderMode" checked />
+          Slider Mode
+        </label>
+        <label>
+          <input type="radio" name="mode" value="interactive" id="interactiveMode" />
+          Interactive Mode
+        </label>
+      </div>
+
+      <!-- Image Selection Slider (Slider Mode) -->
+      <div class="slider-container" id="sliderContainer">
         <label for="imageSlider">Select Input Image:</label>
         <input id="imageSlider" type="range" class="image-slider" min="0" max="19" value="0" step="1" />
         <div class="image-info">
           <span id="imageInfo">Image 1 / 20: file01_00050.png</span>
         </div>
-        <div class="inference-time">
-          <span id="inferenceTime">Inference time: -</span>
-        </div>
+      </div>
+
+      <!-- Interactive Mode Instructions -->
+      <div class="interactive-container" id="interactiveContainer" style="display: none;">
+        <p>Move your mouse over the input canvas to add Gaussian distributions and see real-time inference results.</p>
+        <button id="clearButton">Clear Input</button>
+      </div>
+
+      <!-- Inference Time Display -->
+      <div class="inference-time">
+        <span id="inferenceTime">Inference time: -</span>
       </div>
 
       <!-- Canvas Container for Side-by-Side Display -->
@@ -76,7 +127,7 @@
           <p>Input (Surface Pressure)</p>
           <canvas id="inputCanvas" width="224" height="224"></canvas>
         </div>
-        <div class="canvas-section">
+        <div class="canvas-section" id="targetSection">
           <p>Target (SED, ground truth)</p>
           <canvas id="targetCanvas" width="224" height="224"></canvas>
         </div>
