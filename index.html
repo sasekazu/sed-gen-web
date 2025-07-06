@@ -31,6 +31,14 @@
         border: 1px solid #ccc;
         display: block;
         margin-top: 8px;
+        /* タッチデバイス対応 */
+        touch-action: none;
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        -khtml-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+        user-select: none;
       }
       .slider-container {
         margin: 20px 0;
@@ -128,7 +136,7 @@
 
       <!-- Interactive Mode Instructions -->
       <div class="interactive-container" id="interactiveContainer" style="display: none;">
-        <p>Move your mouse over the input canvas to add Gaussian distributions and see real-time inference results.</p>
+        <p>Move your mouse over the input canvas or touch/tap on mobile devices to add Gaussian distributions and see real-time inference results.</p>
         <button id="clearButton">Clear Input</button>
       </div>
 

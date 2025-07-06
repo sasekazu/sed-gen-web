@@ -437,6 +437,10 @@ function switchMode(mode) {
     inputCanvas.removeEventListener('mousedown', onMouseDown);
     inputCanvas.removeEventListener('mouseup', onMouseUp);
     inputCanvas.removeEventListener('click', onMouseClick);
+    // タッチイベントのリスナーも無効化
+    inputCanvas.removeEventListener('touchstart', onTouchStart);
+    inputCanvas.removeEventListener('touchmove', onTouchMove);
+    inputCanvas.removeEventListener('touchend', onTouchEnd);
     inputCanvas.style.cursor = 'default';
     
     // キャンバスをクリアしてスライダーモードの現在の画像を再描画
@@ -456,6 +460,10 @@ function switchMode(mode) {
     inputCanvas.addEventListener('mousedown', onMouseDown);
     inputCanvas.addEventListener('mouseup', onMouseUp);
     inputCanvas.addEventListener('click', onMouseClick);
+    // タッチイベントのサポート
+    inputCanvas.addEventListener('touchstart', onTouchStart);
+    inputCanvas.addEventListener('touchmove', onTouchMove);
+    inputCanvas.addEventListener('touchend', onTouchEnd);
     inputCanvas.style.cursor = 'crosshair';
     
     // キャンバスをクリア
@@ -724,3 +732,72 @@ Promise.all([loadMasks(), preloadInputImages(), preloadTargetImages()])
     console.error('Failed to initialize application:', error);
     console.log('Some features may not work properly.');
   });
+
+/* タッチイベント用のヘルパー関数 */
+function getTouchCoordinates(event) {
+  const rect = inputCanvas.getBoundingClientRect();
+  const touch = event.touches[0] || event.changedTouches[0];
+  const x = Math.floor((touch.clientX - rect.left) * (SIZE / rect.width));
+  const y = Math.floor((touch.clientY - rect.top) * (SIZE / rect.height));
+  return { x, y };
+}
+
+/* インタラクティブモード用のタッチスタート処理 */
+function onTouchStart(event) {
+  if (currentMode !== 'interactive' || isProcessing) return;
+  
+  // デフォルトのタッチ動作を無効化（スクロール防止など）
+  event.preventDefault();
+  
+  isMouseDown = true;
+  
+  const { x, y } = getTouchCoordinates(event);
+  
+  // より強いガウス分布を永続的に追加
+  generateGaussian(x, y, 0.3, 8.0, true);
+  
+  // キャンバスを更新
+  updateInteractiveCanvas();
+  
+  // 推論を実行
+  performInteractiveInference();
+}
+
+/* インタラクティブモード用のタッチムーブ処理 */
+function onTouchMove(event) {
+  if (currentMode !== 'interactive' || isProcessing) return;
+  
+  // デフォルトのタッチ動作を無効化（スクロール防止など）
+  event.preventDefault();
+  
+  const { x, y } = getTouchCoordinates(event);
+  
+  if (isMouseDown) {
+    // タッチが継続している場合：永続的なデータに追加（より強い分布）
+    generateGaussian(x, y, 0.3, 8.0, true);
+  } else {
+    // タッチが離されている場合：一時的な表示のみ（より弱い分布）
+    // まず永続的なデータのみで interactiveInputData をリセット
+    for (let i = 0; i < SIZE * SIZE; i++) {
+      interactiveInputData[i] = permanentInputData[i];
+    }
+    // 現在のタッチ位置に一時的なガウス分布を追加
+    generateGaussian(x, y, 0.3, 8.0, false);
+  }
+  
+  // キャンバスを更新
+  updateInteractiveCanvas();
+  
+  // 推論を実行
+  performInteractiveInference();
+}
+
+/* インタラクティブモード用のタッチエンド処理 */
+function onTouchEnd(event) {
+  if (currentMode !== 'interactive') return;
+  
+  // デフォルトのタッチ動作を無効化（スクロール防止など）
+  event.preventDefault();
+  
+  isMouseDown = false;
+}
